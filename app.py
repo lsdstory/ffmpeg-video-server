@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify
 import subprocess
 import requests
 import os
-import uuid
 import tempfile
+import base64
 
 app = Flask(__name__)
 
@@ -24,7 +24,6 @@ def extract_frame():
     download_file(video_url, video_path)
     subprocess.run(['ffmpeg', '-ss', str(timestamp), '-i', video_path, '-vframes', '1', '-q:v', '2', frame_path], check=True)
     with open(frame_path, 'rb') as f:
-        import base64
         encoded = base64.b64encode(f.read()).decode('utf-8')
     return jsonify({'frame_base64': encoded, 'timestamp': timestamp})
 
@@ -40,9 +39,28 @@ def cut_clip():
     download_file(video_url, video_path)
     subprocess.run(['ffmpeg', '-ss', str(start), '-i', video_path, '-t', str(length), '-c', 'copy', output_path], check=True)
     with open(output_path, 'rb') as f:
-        import base64
         encoded = base64.b64encode(f.read()).decode('utf-8')
     return jsonify({'clip_base64': encoded})
+
+@app.route('/merge', methods=['POST'])
+def merge_clips():
+    data = request.json
+    clip_urls = data['clip_urls']
+    tmp_dir = tempfile.mkdtemp()
+    clip_paths = []
+    for i, url in enumerate(clip_urls):
+        clip_path = os.path.join(tmp_dir, f'clip_{i}.mp4')
+        download_file(url, clip_path)
+        clip_paths.append(clip_path)
+    concat_file = os.path.join(tmp_dir, 'concat.txt')
+    with open(concat_file, 'w') as f:
+        for path in clip_paths:
+            f.write(f"file '{path}'\n")
+    output_path = os.path.join(tmp_dir, 'merged.mp4')
+    subprocess.run(['ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', output_path], check=True)
+    with open(output_path, 'rb') as f:
+        encoded = base64.b64encode(f.read()).decode('utf-8')
+    return jsonify({'merged_base64': encoded})
 
 @app.route('/health', methods=['GET'])
 def health():
